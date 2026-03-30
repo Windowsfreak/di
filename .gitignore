@@ -1,0 +1,10 @@
+# Ignore all markdown files except README.md
+*.md
+!README.md
+
+*.json
+import
+imported
+music
+.idea/
+.DS_Store
