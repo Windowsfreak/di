@@ -3,6 +3,7 @@
 !README.md
 
 *.json
+!manifest.json
 import
 imported
 music
