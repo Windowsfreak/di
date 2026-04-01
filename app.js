@@ -128,6 +128,11 @@ class AudioEngine {
         
         this.nodes.seek.gain.value = 1.0;
         this.nodes.suno.gain.value = 1.0;
+
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = 'playing';
+            this.updatePositionState();
+        }
     }
 
     pause() {
@@ -138,6 +143,10 @@ class AudioEngine {
             if (this.isPaused && this.audioElement) { 
                 this.audioElement.pause(); 
                 this.nodes.sleep.gain.value = 1.0; 
+                if ('mediaSession' in navigator) {
+                    navigator.mediaSession.playbackState = 'paused';
+                    this.updatePositionState();
+                }
             } 
         }, 1000);
     }
@@ -148,6 +157,10 @@ class AudioEngine {
         this.isPlaying = true;
         this.audioElement.play().catch(e => console.error(e));
         this.fadeNode('playPause', 1.0, 1.0);
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = 'playing';
+            this.updatePositionState();
+        }
     }
 
     seek(time) {
@@ -156,6 +169,7 @@ class AudioEngine {
         
         console.log(`[AudioEngine] Seeking to ${target}s (current: ${this.audioElement.currentTime}s, duration: ${this.getDuration()}s)`);
         
+        this.updatePositionState();
         this.fadeNode('seek', 0.0, 0.1);
         setTimeout(() => {
             try {
@@ -179,12 +193,13 @@ class AudioEngine {
 
     checkSunoFade() {
         const duration = this.getDuration();
-        if (duration > 478) {
+        if (duration > 478 || (duration > 58 && duration < 61)) {
             const remaining = duration - this.getCurrentTime();
             if (remaining <= 5 && remaining > 0) {
                 this.fadeNode('suno', 0.0, remaining);
             }
         }
+        this.updatePositionState();
     }
 
     getCurrentTime() {
@@ -195,6 +210,18 @@ class AudioEngine {
         if (!this.audioElement) return 0;
         const dur = this.audioElement.duration;
         return isNaN(dur) ? 0 : dur;
+    }
+
+    updatePositionState() {
+        if ('mediaSession' in navigator && 'setPositionState' in navigator.mediaSession) {
+            if (this.audioElement && this.audioElement.readyState >= 1 && !isNaN(this.audioElement.duration)) {
+                navigator.mediaSession.setPositionState({
+                    duration: this.audioElement.duration,
+                    playbackRate: this.audioElement.playbackRate || 1,
+                    position: this.audioElement.currentTime
+                });
+            }
+        }
     }
 }
 
@@ -313,6 +340,7 @@ async function init() {
     if (window.innerWidth <= 768) showGenreView(); else showPlaylistView();
     if (defaultGenre) await selectGenre(defaultGenre.id, false);
     setupEventListeners();
+    setupMediaSessionHandlers();
     requestAnimationFrame(updateUI);
 }
 
@@ -437,6 +465,29 @@ function updateMediaSession(t) {
 function updateTitle(t) {
     const g = state.genres.find(g => g.id === state.playlist.currentGenre)?.name || '';
     document.title = `🔊 ${g} - ${t} | Dream Improvisation`;
+}
+
+function setupMediaSessionHandlers() {
+    if (!('mediaSession' in navigator)) return;
+
+    const handlers = {
+        play: () => state.audio.isPaused ? state.audio.resume() : playCurrent(),
+        pause: () => state.audio.pause(),
+        stop: () => state.audio.pause(),
+        previoustrack: () => el.prevBtn.click(),
+        nexttrack: () => el.nextBtn.click(),
+        seekbackward: (details) => state.audio.seek(state.audio.getCurrentTime() - (details.seekOffset || 10)),
+        seekforward: (details) => state.audio.seek(state.audio.getCurrentTime() + (details.seekOffset || 10)),
+        seekto: (details) => state.audio.seek(details.seekTime)
+    };
+
+    for (const [action, handler] of Object.entries(handlers)) {
+        try {
+            navigator.mediaSession.setActionHandler(action, handler);
+        } catch (e) {
+            console.warn(`[MediaSession] Action "${action}" not supported.`, e);
+        }
+    }
 }
 
 function setupEventListeners() {
