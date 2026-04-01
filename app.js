@@ -169,11 +169,11 @@ class AudioEngine {
         
         console.log(`[AudioEngine] Seeking to ${target}s (current: ${this.audioElement.currentTime}s, duration: ${this.getDuration()}s)`);
         
-        this.updatePositionState();
         this.fadeNode('seek', 0.0, 0.1);
         setTimeout(() => {
             try {
                 this.audioElement.currentTime = target;
+                this.updatePositionState();
             } catch (err) {
                 console.error("[AudioEngine] Error seeking HTMLMediaElement:", err);
             }
