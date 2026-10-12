@@ -3,7 +3,7 @@
  * Robust Offline Engine with Separate Shell & Audio Caches
  */
 
-const SHELL_CACHE = 'di-shell-v5';
+const SHELL_CACHE = 'di-shell-v8';
 const AUDIO_CACHE = 'di-audio-offline-v1';
 
 const SHELL_ASSETS = [
@@ -89,10 +89,11 @@ self.addEventListener('message', async (e) => {
 
     if (data.type === 'PRELOAD_TRACK') {
         const { url } = data;
+        const normalizedUrl = new URL(url, self.location.origin).href;
         const cache = await caches.open(AUDIO_CACHE);
-        if (!(await cache.match(url))) {
-            fetch(url).then(resp => {
-                if (resp.ok) cache.put(url, resp);
+        if (!(await cache.match(normalizedUrl, { ignoreSearch: true, ignoreVary: true }))) {
+            fetch(normalizedUrl).then(resp => {
+                if (resp.ok) cache.put(normalizedUrl, resp);
             }).catch(() => {});
         }
     }
@@ -115,7 +116,7 @@ async function handlePlaylistDownload(playlistSlug, files) {
         percent: 0
     });
 
-    for (const url of files) {
+    for (const rawUrl of files) {
         if (controller.signal.aborted) {
             console.log(`[SW] Download aborted for ${playlistSlug}`);
             activeDownloads.delete(playlistSlug);
@@ -123,13 +124,15 @@ async function handlePlaylistDownload(playlistSlug, files) {
             return;
         }
 
+        const absoluteUrl = new URL(rawUrl, self.location.origin).href;
+
         try {
-            const existing = await cache.match(url);
+            const existing = await cache.match(absoluteUrl, { ignoreSearch: true, ignoreVary: true });
             if (!existing) {
-                const response = await fetch(url, { signal: controller.signal });
+                const response = await fetch(absoluteUrl, { signal: controller.signal });
                 if (response.ok) {
-                    await cache.put(url, response);
-                } else if (url.endsWith('.vtt')) {
+                    await cache.put(absoluteUrl, response);
+                } else if (absoluteUrl.endsWith('.vtt')) {
                     // Optional subtitle file, ignore 404
                 } else {
                     throw new Error(`HTTP ${response.status}`);
@@ -150,7 +153,7 @@ async function handlePlaylistDownload(playlistSlug, files) {
                 broadcast({ type: 'DOWNLOAD_ABORTED', playlistSlug });
                 return;
             }
-            console.warn(`[SW] Failed downloading ${url} for ${playlistSlug}:`, err);
+            console.warn(`[SW] Failed downloading ${absoluteUrl} for ${playlistSlug}:`, err);
         }
     }
 
@@ -164,8 +167,9 @@ async function handlePlaylistDownload(playlistSlug, files) {
 
 async function handlePlaylistDelete(playlistSlug, files) {
     const cache = await caches.open(AUDIO_CACHE);
-    for (const url of files) {
-        await cache.delete(url);
+    for (const rawUrl of files) {
+        const absoluteUrl = new URL(rawUrl, self.location.origin).href;
+        await cache.delete(absoluteUrl, { ignoreSearch: true, ignoreVary: true });
     }
     broadcast({
         type: 'DELETE_COMPLETE',
@@ -181,7 +185,7 @@ async function handleStorageReport() {
 
     for (const req of keys) {
         cachedUrls.push(req.url);
-        const resp = await cache.match(req);
+        const resp = await cache.match(req.url, { ignoreSearch: true, ignoreVary: true });
         if (resp) {
             const blob = await resp.blob();
             totalBytes += blob.size;
@@ -215,74 +219,103 @@ self.addEventListener('fetch', (e) => {
 
     if (isDataOrMedia) {
         e.respondWith(
-            caches.open(AUDIO_CACHE).then(async (audioCache) => {
-                const audioCached = await audioCache.match(e.request);
-                if (audioCached) return audioCached;
+            (async () => {
+                const requestUrl = new URL(e.request.url).href;
+                const audioCache = await caches.open(AUDIO_CACHE);
+                let cached = await audioCache.match(requestUrl, { ignoreSearch: true, ignoreVary: true });
+                if (!cached) {
+                    const shellCache = await caches.open(SHELL_CACHE);
+                    cached = await shellCache.match(requestUrl, { ignoreSearch: true, ignoreVary: true });
+                }
+                if (cached) return cached;
 
-                const shellCache = await caches.open(SHELL_CACHE);
-                const shellCached = await shellCache.match(e.request);
-                if (shellCached) return shellCached;
-
-                return fetch(e.request).then((resp) => {
-                    if (resp.status === 200) {
+                try {
+                    const resp = await fetch(e.request);
+                    if (resp && resp.status === 200) {
                         const clone = resp.clone();
                         // Cache DB files in audioCache if under db/
                         if (url.pathname.includes('/db/')) {
-                            audioCache.put(e.request, clone);
+                            await audioCache.put(requestUrl, clone);
                         } else {
-                            shellCache.put(e.request, clone);
+                            const shellCache = await caches.open(SHELL_CACHE);
+                            await shellCache.put(requestUrl, clone);
                         }
                     }
                     return resp;
-                }).catch(() => {
-                    // Offline fallback: try either cache again
-                    return audioCached || shellCached || new Response('', { status: 404, statusText: 'Not Found' });
-                });
-            })
+                } catch (err) {
+                    // Offline fallback: check caches once more with URL matching
+                    const fallback = (await audioCache.match(requestUrl, { ignoreSearch: true, ignoreVary: true })) ||
+                                     (await (await caches.open(SHELL_CACHE)).match(requestUrl, { ignoreSearch: true, ignoreVary: true }));
+                    if (fallback) return fallback;
+                    return new Response('Not found', { status: 404, statusText: 'Not Found' });
+                }
+            })()
         );
         return;
     }
 
-    // 3. App Shell (HTML, CSS, JS) - Stale While Revalidate
+    // 3. App Shell (HTML, CSS, JS) - Cache First with Background Network Revalidation
     e.respondWith(
-        caches.match(e.request).then((cached) => {
-            const fetchPromise = fetch(e.request).then((networkResponse) => {
-                if (networkResponse.status === 200) {
-                    const cloned = networkResponse.clone();
-                    caches.open(SHELL_CACHE).then((cache) => cache.put(e.request, cloned));
+        (async () => {
+            const requestUrl = new URL(e.request.url).href;
+            const shellCache = await caches.open(SHELL_CACHE);
+            const cached = await shellCache.match(requestUrl, { ignoreSearch: true, ignoreVary: true }) ||
+                           await shellCache.match(e.request);
+
+            const fetchPromise = fetch(e.request).then(async (networkResponse) => {
+                if (networkResponse && networkResponse.status === 200) {
+                    await shellCache.put(requestUrl, networkResponse.clone());
                 }
                 return networkResponse;
-            }).catch(() => {
-                // If network fails (airplane mode), fallback cleanly to cached version
-                return cached;
-            });
+            }).catch(() => null);
 
-            return cached || fetchPromise;
-        })
+            if (cached) {
+                // If we have cached version, revalidate in background and return cached immediately!
+                fetchPromise.catch(() => {});
+                return cached;
+            }
+
+            const netResp = await fetchPromise;
+            if (netResp) return netResp;
+            return cached || new Response('Offline', { status: 503, statusText: 'Offline' });
+        })()
     );
 });
 
 // Seekable 206 Partial Content Audio Handler
 async function handleAudioRequest(request) {
     const audioCache = await caches.open(AUDIO_CACHE);
-    let cachedResponse = await audioCache.match(request);
+    const requestUrl = new URL(request.url).href;
+    let cachedResponse = await audioCache.match(requestUrl, { ignoreSearch: true, ignoreVary: true });
+
+    if (!cachedResponse) {
+        const shellCache = await caches.open(SHELL_CACHE);
+        cachedResponse = await shellCache.match(requestUrl, { ignoreSearch: true, ignoreVary: true });
+    }
 
     if (!cachedResponse) {
         try {
             const networkResponse = await fetch(request.url);
             if (networkResponse.ok) {
-                await audioCache.put(request.url, networkResponse.clone());
-                cachedResponse = await audioCache.match(request.url);
+                await audioCache.put(requestUrl, networkResponse.clone());
+                cachedResponse = await audioCache.match(requestUrl, { ignoreSearch: true, ignoreVary: true });
             } else {
                 return networkResponse;
             }
         } catch (err) {
-            console.warn('[SW] Offline and audio not cached:', request.url);
+            console.warn('[SW] Offline and audio not cached:', requestUrl);
             return new Response('Audio not available offline', {
                 status: 503,
                 statusText: 'Service Unavailable'
             });
         }
+    }
+
+    if (!cachedResponse) {
+        return new Response('Audio not available offline', {
+            status: 503,
+            statusText: 'Service Unavailable'
+        });
     }
 
     // Serve from Cache with HTTP 206 Partial Content (essential for Safari/Chrome seeking)

@@ -15,6 +15,7 @@ class AudioEngine {
         this.currentUrl = null;
         this.intentUrl = null;
         this.fades = { main: 1.0, playPause: 1.0, seek: 1.0, sleep: 1.0 };
+        this.mediaRetryCount = 0;
     }
 
     init() {
@@ -42,13 +43,30 @@ class AudioEngine {
         };
 
         this.audioElement.onerror = (e) => {
-            if (this.isPlaying && this.currentUrl) {
-                const err = this.audioElement.error;
-                console.warn("[Audio] Media error:", err ? err.code : 'unknown', err ? err.message : '');
+            const err = this.audioElement.error;
+            console.warn("[Audio] Media error:", err ? err.code : 'unknown', err ? err.message : '');
+
+            // Circuit breaker: limit retries to at most 2 with delay to avoid infinite spin
+            if (this.isPlaying && this.currentUrl && this.mediaRetryCount < 2) {
+                this.mediaRetryCount++;
                 const currentTime = this.audioElement.currentTime;
-                this.audioElement.load();
-                if (currentTime > 0) this.audioElement.currentTime = currentTime;
-                this.audioElement.play().catch(console.error);
+                setTimeout(() => {
+                    if (this.isPlaying && this.currentUrl) {
+                        this.audioElement.load();
+                        if (currentTime > 0) {
+                            try { this.audioElement.currentTime = currentTime; } catch(err) {}
+                        }
+                        this.audioElement.play().catch(() => {});
+                    }
+                }, 1000);
+            } else {
+                this.mediaRetryCount = 0;
+                this.isPlaying = false;
+                this.isPaused = true;
+                this.resetGainNodes();
+                if (typeof showHudToast === 'function') {
+                    showHudToast('⚠️', 'Track Unavailable', 'Download playlist for offline listening');
+                }
             }
         };
 
@@ -63,6 +81,25 @@ class AudioEngine {
 
         const savedVol = localStorage.getItem('di_volume');
         this.setVolume(savedVol !== null ? parseFloat(savedVol) : 1.0, false);
+    }
+
+    resetGainNodes() {
+        if (!this.ctx) return;
+        try {
+            const now = this.ctx.currentTime;
+            if (this.nodes.playPause) {
+                this.nodes.playPause.gain.cancelScheduledValues(now);
+                this.nodes.playPause.gain.setValueAtTime(1.0, now);
+            }
+            if (this.nodes.seek) {
+                this.nodes.seek.gain.cancelScheduledValues(now);
+                this.nodes.seek.gain.setValueAtTime(1.0, now);
+            }
+            if (this.nodes.sleep) {
+                this.nodes.sleep.gain.cancelScheduledValues(now);
+                this.nodes.sleep.gain.setValueAtTime(1.0, now);
+            }
+        } catch (e) {}
     }
 
     setVolume(value, smooth = true) {
@@ -102,8 +139,16 @@ class AudioEngine {
 
         try {
             await this.audioElement.play();
+            this.mediaRetryCount = 0;
         } catch(e) {
-            console.error("[Audio] Playback failed:", e);
+            console.warn("[Audio] Playback failed:", e);
+            this.isPlaying = false;
+            this.isPaused = true;
+            this.resetGainNodes();
+            if (typeof showHudToast === 'function') {
+                showHudToast('⚠️', 'Track Unavailable', 'Download playlist for offline listening');
+            }
+            return;
         }
 
         if (this.intentUrl !== url) return;
@@ -115,16 +160,15 @@ class AudioEngine {
         this.isPlaying = true;
         this.isPaused = false;
         this.nodes.sleep.gain.value = 1.0;
+        this.nodes.seek.gain.value = 1.0;
 
+        this.nodes.playPause.gain.cancelScheduledValues(this.ctx.currentTime);
         if (!noFadeIn) {
-            this.nodes.playPause.gain.cancelScheduledValues(this.ctx.currentTime);
             this.nodes.playPause.gain.setValueAtTime(0.0, this.ctx.currentTime);
             this.fadeNode('playPause', 1.0, 1.0);
         } else {
-            this.nodes.playPause.gain.value = 1.0;
+            this.nodes.playPause.gain.setValueAtTime(1.0, this.ctx.currentTime);
         }
-
-        this.nodes.seek.gain.value = 1.0;
 
         if ('mediaSession' in navigator) {
             navigator.mediaSession.playbackState = 'playing';
@@ -154,8 +198,11 @@ class AudioEngine {
         if (!this.isPaused) return;
         this.isPaused = false;
         this.isPlaying = true;
+        this.nodes.playPause.gain.cancelScheduledValues(this.ctx.currentTime);
+        this.nodes.playPause.gain.setValueAtTime(1.0, this.ctx.currentTime);
+        this.nodes.seek.gain.setValueAtTime(1.0, this.ctx.currentTime);
+        this.nodes.sleep.gain.setValueAtTime(1.0, this.ctx.currentTime);
         this.audioElement.play().catch(console.error);
-        this.fadeNode('playPause', 1.0, 0.8);
         if ('mediaSession' in navigator) {
             navigator.mediaSession.playbackState = 'playing';
             this.updatePositionState();
@@ -265,12 +312,29 @@ class PlaylistManager {
     }
 
     async setPlaylist(playlistSlug) {
-        const response = await fetch(`db/playlist/${playlistSlug}/index.json`);
-        this.playlistData = await response.json();
+        try {
+            const response = await fetch(`db/playlist/${playlistSlug}/index.json`);
+            if (response.ok) {
+                this.playlistData = await response.json();
+            } else {
+                throw new Error(`HTTP ${response.status}`);
+            }
+        } catch(err) {
+            console.warn(`[Playlist] Error fetching index.json for ${playlistSlug}:`, err);
+            // Fallback to cached allPlaylistsMeta if available
+            if (typeof state !== 'undefined' && state.allPlaylistsMeta) {
+                const meta = state.allPlaylistsMeta.find(p => p.slug === playlistSlug);
+                if (meta) {
+                    this.playlistData = Object.assign({
+                        tracks: [{ slug: meta.slug, title: meta.title, duration_sec: meta.total_duration_sec, format: 'opus' }]
+                    }, meta);
+                }
+            }
+        }
         this.currentPlaylist = playlistSlug;
 
         // Initialize track queue with magic shuffle
-        if (this.playlistData.tracks && this.playlistData.tracks.length > 1) {
+        if (this.playlistData && this.playlistData.tracks && this.playlistData.tracks.length > 1) {
             const trackIndices = this.playlistData.tracks.map((_, i) => i);
             this.trackQueue = this.getRandomIndices(trackIndices, Math.min(4, trackIndices.length), []);
             this.trackQueueIndex = 0;
@@ -642,7 +706,7 @@ async function restorePlaybackSession() {
     if (catSlug) {
         state.playlist.currentCategory = catSlug;
         const cat = state.categories.find(c => c.slug === catSlug);
-        const playlists = state.playlistsByCat.get(catSlug) || [];
+        const playlists = await ensureCategoryPlaylistsLoaded(catSlug);
         state.playlist.setCategory(catSlug, playlists);
         el.viewTitle.textContent = cat ? cat.title : 'Playlists';
         renderCategories();
@@ -729,26 +793,49 @@ async function init() {
         });
     }
 
-    // Load Categories & Playlists metadata
+    // 1. Instant hydration from localStorage cache (resilient offline bootstrap)
+    try {
+        const cachedCats = localStorage.getItem('di_cached_categories');
+        if (cachedCats) state.categories = JSON.parse(cachedCats);
+
+        const cachedAll = localStorage.getItem('di_cached_all_playlists_meta');
+        if (cachedAll) state.allPlaylistsMeta = JSON.parse(cachedAll);
+
+        const cachedByCat = localStorage.getItem('di_cached_playlists_by_cat');
+        if (cachedByCat) state.playlistsByCat = new Map(JSON.parse(cachedByCat));
+    } catch(e) {
+        console.warn('[Init] Local cache hydration note:', e);
+    }
+
+    // 2. Load Categories & Playlists metadata from network / service worker
     try {
         const catResp = await fetch('db/categories.json');
-        state.categories = await catResp.json();
+        if (catResp.ok) {
+            state.categories = await catResp.json();
+            localStorage.setItem('di_cached_categories', JSON.stringify(state.categories));
+        }
 
         const plsResp = await fetch('db/playlists.json');
-        state.allPlaylistsMeta = await plsResp.json();
-
-        // Load playlists per category
-        for (const cat of state.categories) {
-            try {
-                const cResp = await fetch(`db/category/${cat.slug}.json`);
-                const cData = await cResp.json();
-                state.playlistsByCat.set(cat.slug, cData.playlists || []);
-            } catch(e) {
-                state.playlistsByCat.set(cat.slug, []);
-            }
+        if (plsResp.ok) {
+            state.allPlaylistsMeta = await plsResp.json();
+            localStorage.setItem('di_cached_all_playlists_meta', JSON.stringify(state.allPlaylistsMeta));
         }
     } catch(err) {
-        console.error("[Init] Failed loading DB JSON:", err);
+        console.warn("[Init] Running with offline cached metadata:", err);
+    }
+
+    // If offline filter is active or browser is offline, ensure we pick a category with downloads if possible
+    if ((state.offlineFilterActive || !navigator.onLine) && state.offlinePlaylists.size > 0) {
+        const currentCatHasDownloads = (state.playlistsByCat.get(state.playlist.currentCategory) || []).some(p => state.offlinePlaylists.has(p.slug));
+        if (!currentCatHasDownloads) {
+            const catWithDownloads = state.categories.find(c => {
+                const pls = state.playlistsByCat.get(c.slug) || [];
+                return pls.some(p => state.offlinePlaylists.has(p.slug));
+            });
+            if (catWithDownloads) {
+                state.playlist.currentCategory = catWithDownloads.slug;
+            }
+        }
     }
 
     renderCategories();
@@ -756,7 +843,8 @@ async function init() {
     // Restore saved playback position & track, or fallback to first category
     const restored = await restorePlaybackSession();
     if (!restored && state.categories.length > 0) {
-        await selectCategory(state.categories[0].slug);
+        const targetCat = state.playlist.currentCategory || state.categories[0].slug;
+        await selectCategory(targetCat);
     }
 
     updateDownloadedBadge();
@@ -842,6 +930,17 @@ function setupNetworkListeners() {
             state.offlineFilterActive = true;
             el.offlineFilterBtn.classList.add('active');
             el.offlineActiveBanner.classList.remove('hidden');
+
+            if (state.offlinePlaylists.size > 0) {
+                const currentCatHasDownloads = (state.playlistsByCat.get(state.playlist.currentCategory) || []).some(p => state.offlinePlaylists.has(p.slug));
+                if (!currentCatHasDownloads) {
+                    const catWithDownloads = state.categories.find(c => (state.playlistsByCat.get(c.slug) || []).some(p => state.offlinePlaylists.has(p.slug)));
+                    if (catWithDownloads) {
+                        state.playlist.currentCategory = catWithDownloads.slug;
+                        el.viewTitle.textContent = catWithDownloads.title;
+                    }
+                }
+            }
         } else if (!el.offlineFilterBtn.classList.contains('active')) {
             state.offlineFilterActive = false;
             el.offlineActiveBanner.classList.add('hidden');
@@ -876,8 +975,8 @@ function renderCategories() {
     el.categoryList.innerHTML = state.categories.map(c => {
         const playlists = state.playlistsByCat.get(c.slug) || [];
         const count = state.offlineFilterActive
-            ? playlists.filter(p => state.offlinePlaylists.has(p.slug)).length
-            : playlists.length;
+            ? (state.playlistsByCat.has(c.slug) ? playlists.filter(p => state.offlinePlaylists.has(p.slug)).length : (c.total_playlists || 0))
+            : (c.total_playlists !== undefined ? c.total_playlists : playlists.length);
 
         const isActive = state.playlist.currentCategory === c.slug;
         return `
@@ -889,10 +988,32 @@ function renderCategories() {
     }).join('');
 }
 
+async function ensureCategoryPlaylistsLoaded(categorySlug) {
+    if (!categorySlug) return [];
+    if (state.playlistsByCat.has(categorySlug) && state.playlistsByCat.get(categorySlug).length > 0) {
+        return state.playlistsByCat.get(categorySlug);
+    }
+    try {
+        const resp = await fetch(`db/category/${categorySlug}.json`);
+        if (resp.ok) {
+            const data = await resp.json();
+            const playlists = data.playlists || [];
+            state.playlistsByCat.set(categorySlug, playlists);
+            try {
+                localStorage.setItem('di_cached_playlists_by_cat', JSON.stringify(Array.from(state.playlistsByCat.entries())));
+            } catch(e) {}
+            return playlists;
+        }
+    } catch(err) {
+        console.warn(`[Category] Failed loading category ${categorySlug}:`, err);
+    }
+    return state.playlistsByCat.get(categorySlug) || [];
+}
+
 async function selectCategory(categorySlug) {
     state.playlist.currentCategory = categorySlug;
     const cat = state.categories.find(c => c.slug === categorySlug);
-    const playlists = state.playlistsByCat.get(categorySlug) || [];
+    const playlists = await ensureCategoryPlaylistsLoaded(categorySlug);
 
     state.playlist.setCategory(categorySlug, playlists);
 
@@ -909,12 +1030,23 @@ function renderPlaylists() {
         playlists = playlists.filter(p => state.offlinePlaylists.has(p.slug));
     }
 
-    el.viewMeta.textContent = `${playlists.length} Playlists`;
+    // Fallback: If offline mode is active and this category has no downloads, but user HAS downloaded playlists:
+    if (state.offlineFilterActive && playlists.length === 0 && state.offlinePlaylists.size > 0) {
+        const allDownloaded = state.allPlaylistsMeta.filter(p => state.offlinePlaylists.has(p.slug));
+        if (allDownloaded.length > 0) {
+            playlists = allDownloaded;
+            el.viewTitle.textContent = 'Downloaded Playlists';
+            el.viewMeta.textContent = `${playlists.length} Offline Playlists`;
+        }
+    } else {
+        el.viewMeta.textContent = `${playlists.length} Playlists`;
+    }
 
     if (playlists.length === 0) {
         el.playlistGrid.innerHTML = `
             <div style="grid-column: 1/-1; text-align: center; padding: 3rem 1rem; color: var(--text-dim);">
-                <p>No ${state.offlineFilterActive ? 'downloaded ' : ''}playlists found in this category.</p>
+                <p>No ${state.offlineFilterActive ? 'downloaded ' : ''}playlists found.</p>
+                ${state.offlineFilterActive ? '<p style="font-size: 0.85rem; margin-top: 0.5rem;">Tap another category on the left or disable Offline Mode to browse all playlists.</p>' : ''}
             </div>
         `;
         return;
@@ -1136,14 +1268,14 @@ async function handleDownloadToggle(playlistSlug) {
             const plResp = await fetch(`db/playlist/${playlistSlug}/index.json`);
             const plData = await plResp.json();
             const urls = [
-                `db/playlist/${playlistSlug}/index.json`,
-                `db/playlist/${playlistSlug}/index.webp`
+                new URL(`db/playlist/${playlistSlug}/index.json`, window.location.origin).href,
+                new URL(`db/playlist/${playlistSlug}/index.webp`, window.location.origin).href
             ];
             if (plData.tracks) {
                 plData.tracks.forEach((t, i) => {
                     const num = String(i + 1).padStart(2, '0');
-                    urls.push(`db/playlist/${playlistSlug}/${num}-${t.slug}.${t.format || 'opus'}`);
-                    urls.push(`db/playlist/${playlistSlug}/${num}-${t.slug}.vtt`);
+                    urls.push(new URL(`db/playlist/${playlistSlug}/${num}-${t.slug}.${t.format || 'opus'}`, window.location.origin).href);
+                    urls.push(new URL(`db/playlist/${playlistSlug}/${num}-${t.slug}.vtt`, window.location.origin).href);
                 });
             }
             sendSWMessage({
@@ -1163,14 +1295,14 @@ async function handleDownloadToggle(playlistSlug) {
             const plResp = await fetch(`db/playlist/${playlistSlug}/index.json`);
             const plData = await plResp.json();
             const urls = [
-                `db/playlist/${playlistSlug}/index.json`,
-                `db/playlist/${playlistSlug}/index.webp`
+                new URL(`db/playlist/${playlistSlug}/index.json`, window.location.origin).href,
+                new URL(`db/playlist/${playlistSlug}/index.webp`, window.location.origin).href
             ];
             if (plData.tracks) {
                 plData.tracks.forEach((t, i) => {
                     const num = String(i + 1).padStart(2, '0');
-                    urls.push(`db/playlist/${playlistSlug}/${num}-${t.slug}.${t.format || 'opus'}`);
-                    urls.push(`db/playlist/${playlistSlug}/${num}-${t.slug}.vtt`);
+                    urls.push(new URL(`db/playlist/${playlistSlug}/${num}-${t.slug}.${t.format || 'opus'}`, window.location.origin).href);
+                    urls.push(new URL(`db/playlist/${playlistSlug}/${num}-${t.slug}.vtt`, window.location.origin).href);
                 });
             }
             sendSWMessage({
@@ -1311,6 +1443,17 @@ function setupEventListeners() {
         state.offlineFilterActive = !state.offlineFilterActive;
         el.offlineFilterBtn.classList.toggle('active', state.offlineFilterActive);
         el.offlineActiveBanner.classList.toggle('hidden', !state.offlineFilterActive);
+
+        if (state.offlineFilterActive && state.offlinePlaylists.size > 0) {
+            const currentCatHasDownloads = (state.playlistsByCat.get(state.playlist.currentCategory) || []).some(p => state.offlinePlaylists.has(p.slug));
+            if (!currentCatHasDownloads) {
+                const catWithDownloads = state.categories.find(c => (state.playlistsByCat.get(c.slug) || []).some(p => state.offlinePlaylists.has(p.slug)));
+                if (catWithDownloads) {
+                    state.playlist.currentCategory = catWithDownloads.slug;
+                    el.viewTitle.textContent = catWithDownloads.title;
+                }
+            }
+        }
         renderCategories();
         renderPlaylists();
     });
@@ -1581,7 +1724,7 @@ async function onNextClicked() {
     } else {
         // Single-track playlist: Category Radio!
         const currentCatSlug = state.playlist.currentCategory;
-        let playlists = state.playlistsByCat.get(currentCatSlug) || [];
+        let playlists = await ensureCategoryPlaylistsLoaded(currentCatSlug);
         if (state.offlineFilterActive) {
             playlists = playlists.filter(p => state.offlinePlaylists.has(p.slug));
         }
