@@ -456,7 +456,7 @@ class PlaylistManager {
     getTrackVttUrl(index = this.currentTrackIndex) {
         if (!this.playlistData || !this.playlistData.tracks) return null;
         const track = this.playlistData.tracks[index];
-        if (!track) return null;
+        if (!track || track.has_subtitle !== true) return null;
         const num = String(index + 1).padStart(2, '0');
         return `db/playlist/${this.currentPlaylist}/${num}-${track.slug}.vtt`;
     }
@@ -1226,6 +1226,12 @@ async function loadVTTForCurrentTrack() {
     state.hasVtt = false;
 
     const vttUrl = state.playlist.getTrackVttUrl();
+    if (!vttUrl) {
+        el.vttBtn.classList.add('hidden');
+        closeVttOverlay();
+        return;
+    }
+
     try {
         const resp = await fetch(vttUrl);
         if (resp.ok) {
@@ -1323,7 +1329,9 @@ async function handleDownloadToggle(playlistSlug) {
                 plData.tracks.forEach((t, i) => {
                     const num = String(i + 1).padStart(2, '0');
                     urls.push(new URL(`db/playlist/${playlistSlug}/${num}-${t.slug}.${t.format || 'opus'}`, window.location.origin).href);
-                    urls.push(new URL(`db/playlist/${playlistSlug}/${num}-${t.slug}.vtt`, window.location.origin).href);
+                    if (t.has_subtitle === true) {
+                        urls.push(new URL(`db/playlist/${playlistSlug}/${num}-${t.slug}.vtt`, window.location.origin).href);
+                    }
                 });
             }
             sendSWMessage({
@@ -1350,7 +1358,9 @@ async function handleDownloadToggle(playlistSlug) {
                 plData.tracks.forEach((t, i) => {
                     const num = String(i + 1).padStart(2, '0');
                     urls.push(new URL(`db/playlist/${playlistSlug}/${num}-${t.slug}.${t.format || 'opus'}`, window.location.origin).href);
-                    urls.push(new URL(`db/playlist/${playlistSlug}/${num}-${t.slug}.vtt`, window.location.origin).href);
+                    if (t.has_subtitle === true) {
+                        urls.push(new URL(`db/playlist/${playlistSlug}/${num}-${t.slug}.vtt`, window.location.origin).href);
+                    }
                 });
             }
             sendSWMessage({
