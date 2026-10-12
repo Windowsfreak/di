@@ -11,36 +11,85 @@
     <link rel="apple-touch-icon" href="icon.png">
 </head>
 <body class="dark-theme">
-    <div id="app" class="app-container show-genres">
-        <!-- Horizontal Sidebar / Vertical Top Area -->
+    <div id="app" class="app-container show-categories">
+        <!-- Sidebar: Categories & Offline Toggle -->
         <aside id="sidebar" class="sidebar">
             <header class="sidebar-header">
-                <h1 class="app-title">Dream Improvisation</h1>
+                <div class="header-top">
+                    <h1 class="app-title">Dream Improvisation</h1>
+                    <div class="header-actions">
+                        <span id="network-pill" class="pill-badge online" title="Network Status">Online</span>
+                        <button id="settings-btn" class="btn-icon-subtle" aria-label="Maintenance & Settings" title="Maintenance & Storage">
+                            <svg viewBox="0 0 24 24"><path fill="currentColor" d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="offline-tab-container">
+                    <button id="offline-filter-btn" class="offline-filter-btn" aria-label="Toggle Downloaded Playlists Only">
+                        <span class="offline-icon">⚡</span>
+                        <span class="offline-text">Downloaded Only</span>
+                        <span id="downloaded-count-badge" class="badge-count">0</span>
+                    </button>
+                </div>
             </header>
 
-            <div id="genre-view" class="genre-view">
+            <div id="category-view" class="category-view">
                 <header class="section-header">
-                    <h2>Genres</h2>
+                    <h2>Categories</h2>
                 </header>
-                <div id="genre-list" class="genre-list"></div>
+                <div id="category-list" class="category-list"></div>
             </div>
-            
-            <!-- In Horizontal view, controls are inside the sidebar -->
-            <div id="desktop-controls-placeholder"></div>
         </aside>
 
         <!-- Main Content Area -->
         <main id="main-view" class="main-view">
-            <div id="playlist-view" class="playlist-view">
-                <div id="playlist-container" class="playlist-container"></div>
+            <!-- Breadcrumbs / Section Header -->
+            <header class="main-topbar">
+                <button id="back-btn" class="btn-text styled visible-mobile" aria-label="Back to Categories">
+                    ← Categories
+                </button>
+                <div class="topbar-info">
+                    <h2 id="view-title">Sound Baths</h2>
+                    <span id="view-meta" class="view-meta">3 Playlists</span>
+                </div>
+                <div id="offline-active-banner" class="offline-active-banner hidden">
+                    <span>⚡ Offline Mode Active</span>
+                </div>
+            </header>
+
+            <!-- Playlists Browser -->
+            <div id="playlists-view" class="playlists-view">
+                <div id="playlist-grid" class="playlist-grid"></div>
+            </div>
+
+            <!-- Detail / Playing View -->
+            <div id="player-detail-view" class="player-detail-view hidden">
+                <div class="hero-player-card">
+                    <div class="hero-artwork-wrapper">
+                        <div id="hero-backdrop" class="hero-backdrop"></div>
+                        <img id="hero-cover" class="hero-cover" src="icon.png" alt="Playlist Cover">
+                    </div>
+                    <div class="hero-info">
+                        <h2 id="hero-title">Select a Playlist</h2>
+                        <p id="hero-narrator" class="hero-narrator"></p>
+                        <p id="hero-meta" class="hero-meta"></p>
+                    </div>
+                </div>
+
+                <!-- Tracklist Container (for multi-track playlists) -->
+                <div id="tracklist-container" class="tracklist-container hidden">
+                    <h3 class="tracklist-heading">Tracks</h3>
+                    <div id="track-list" class="track-list"></div>
+                </div>
             </div>
         </main>
 
         <!-- Shared Playback Controls -->
         <section id="controls" class="playback-controls">
             <div class="track-info-mini">
-                <span id="current-track-name">Select a Genre...</span>
-                <span id="current-genre-name"></span>
+                <span id="current-track-name">Select a playlist...</span>
+                <span id="current-playlist-name"></span>
             </div>
             
             <div class="progress-container">
@@ -71,19 +120,93 @@
                 </div>
 
                 <div class="secondary-btns">
-                    <div id="ratings-placeholder" class="ratings-container" title="Ratings (Coming Soon)">
-                        <span class="active">★</span><span class="active">★</span><span class="active">★</span><span>★</span><span>★</span>
-                    </div>
+                    <!-- Playback Mode Toggle: Category Shuffle, Repeat 1, Sequential -->
+                    <button id="playback-mode-btn" class="btn-icon-subtle mode-btn" title="Playback Mode: Shuffle" aria-label="Playback Mode">
+                        <span id="mode-icon">🔀</span>
+                    </button>
+
+                    <!-- Realtime VTT Lyrics/Subtitles button -->
+                    <button id="vtt-btn" class="btn-icon-subtle vtt-toggle-btn hidden" title="Lyrics / Subtitles" aria-label="Toggle Subtitles">
+                        <svg viewBox="0 0 24 24"><path fill="currentColor" d="M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 7H9.5v-.5h-2v3h2V13H11v1c0 .55-.45 1-1 1H7c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1zm7 0h-1.5v-.5h-2v3h2V13H18v1c0 .55-.45 1-1 1h-3c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1z"/></svg>
+                    </button>
+
                     <button id="sleep-timer-btn" class="btn-text styled" aria-label="Sleep Timer">Sleep Timer</button>
-                    <button id="genre-toggle" class="btn-text styled visible-mobile" aria-label="Toggle Genre List">Genres</button>
+                    <button id="nav-toggle" class="btn-text styled visible-mobile" aria-label="Toggle View">Library</button>
                 </div>
             </div>
-
-            <footer class="attribution">
-                <p>All songs generated by a free version of <a href="https://suno.com" target="_blank" rel="noopener">Suno.com</a>. This is a non-profit project.</p>
-            </footer>
         </section>
 
+        <!-- HUD Action Hint Toast (Presentation / IDE Mode) -->
+        <div id="hud-toast" class="hud-toast hidden" aria-live="polite">
+            <span id="hud-toast-icon" class="hud-toast-icon">🔀</span>
+            <div class="hud-toast-content">
+                <span id="hud-toast-title" class="hud-toast-title">Shuffle</span>
+                <span id="hud-toast-desc" class="hud-toast-desc">Non-repeating queue</span>
+            </div>
+        </div>
+
+        <!-- Fullscreen VTT Subtitle / Realtime Lyrics Modal -->
+        <div id="vtt-overlay" class="vtt-overlay hidden">
+            <header class="vtt-topbar">
+                <div class="vtt-title-info">
+                    <span class="vtt-badge">Meditation Transcript</span>
+                    <h3 id="vtt-track-title">Subtitles</h3>
+                </div>
+                <button id="close-vtt-btn" class="btn-icon-subtle close-btn" aria-label="Close Subtitles">✕</button>
+            </header>
+
+            <div id="vtt-cues-container" class="vtt-cues-container">
+                <!-- Highlighted and scrollable transcript cues will be rendered here -->
+            </div>
+
+            <div class="vtt-mini-controls">
+                <div class="vtt-progress-wrapper">
+                    <span id="vtt-current-time" class="time">0:00</span>
+                    <div id="vtt-progress-bar" class="progress-bar">
+                        <div id="vtt-progress-fill" class="progress-fill"></div>
+                    </div>
+                    <span id="vtt-total-time" class="time">0:00</span>
+                </div>
+                <div class="vtt-actions">
+                    <button id="vtt-play-pause-btn" class="btn-icon btn-primary" aria-label="Play/Pause">
+                        <svg id="vtt-play-icon" viewBox="0 0 24 24"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>
+                        <svg id="vtt-pause-icon" class="hidden" viewBox="0 0 24 24"><path fill="currentColor" d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings & Offline Maintenance Modal -->
+        <div id="settings-modal" class="modal hidden">
+            <div class="modal-content settings-modal-content">
+                <div class="modal-header">
+                    <h3>App Maintenance & Storage</h3>
+                    <button id="close-settings-btn" class="btn-icon-subtle" aria-label="Close Settings">✕</button>
+                </div>
+
+                <div class="settings-section">
+                    <h4>Offline Audio Storage</h4>
+                    <p id="storage-status-text" class="settings-hint">Calculating storage usage...</p>
+                    <div class="storage-actions">
+                        <button id="clear-downloads-btn" class="btn-danger-outline">Clear All Downloaded Music</button>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h4>App Updates & Cache</h4>
+                    <p class="settings-hint">If updates don't appear automatically, you can force-reload the app shell.</p>
+                    <div class="storage-actions">
+                        <button id="force-reload-btn" class="btn-primary-rect">Force Clear App Cache & Reload</button>
+                    </div>
+                </div>
+
+                <div class="settings-footer">
+                    <span>Dream Improvisation PWA • Offline Ready</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sleep Timer Modal -->
         <div id="sleep-timer-modal" class="modal hidden">
             <div class="modal-content">
                 <h3>Sleep Timer</h3>
