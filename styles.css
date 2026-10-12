@@ -27,10 +27,15 @@ body {
 
 .app-container {
     display: grid;
-    grid-template-columns: 360px 1fr;
+    grid-template-columns: 320px 1fr 380px;
     grid-template-rows: 1fr auto;
     width: 100%;
     height: 100vh;
+    transition: grid-template-columns 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.app-container.tracklist-collapsed {
+    grid-template-columns: 320px 1fr 0px;
 }
 
 /* ==========================================================================
@@ -120,12 +125,21 @@ body {
 }
 
 .main-topbar {
-    padding: 1.5rem 2rem 1rem 2rem;
+    padding: 1.25rem 2rem 1rem 2rem;
     display: flex; align-items: center; justify-content: space-between;
     border-bottom: 1px solid var(--border-subtle);
     background: var(--bg-color);
     position: sticky; top: 0; z-index: 50;
+    gap: 1rem;
 }
+
+.topbar-left {
+    display: flex; align-items: center; gap: 1rem;
+}
+.topbar-actions {
+    display: flex; align-items: center; gap: 0.8rem;
+}
+
 .topbar-info h2 { font-size: 1.35rem; font-weight: 600; }
 .view-meta { font-size: 0.82rem; color: var(--text-dim); }
 
@@ -133,6 +147,27 @@ body {
     background: rgba(240, 147, 43, 0.15); border: 1px solid rgba(240, 147, 43, 0.4);
     color: var(--accent-color); padding: 0.35rem 0.8rem; border-radius: 20px;
     font-size: 0.8rem; font-weight: 600;
+}
+
+.btn-panel-toggle {
+    display: inline-flex; align-items: center; gap: 0.5rem;
+    padding: 0.45rem 0.9rem; border-radius: 20px;
+    font-size: 0.82rem; font-weight: 500;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-main);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+.btn-panel-toggle svg { width: 16px; height: 16px; }
+.btn-panel-toggle:hover {
+    background: var(--surface-hover);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+.btn-panel-toggle.active {
+    background: rgba(140, 122, 230, 0.15);
+    border-color: var(--primary-color);
+    color: white;
 }
 
 /* ==========================================================================
@@ -196,63 +231,126 @@ body {
 .card-meta { margin-top: auto; font-size: 0.75rem; color: var(--text-dim); display: flex; justify-content: space-between; }
 
 /* ==========================================================================
-   Hero Player & Tracklist Detail View
+   Dedicated Split-View Tracklist Panel
    ========================================================================== */
-.player-detail-view { padding: 2rem; max-width: 900px; margin: 0 auto; width: 100%; }
+.tracklist-panel {
+    grid-column: 3; grid-row: 1 / 3;
+    width: 380px;
+    background: #13131a;
+    border-left: 1px solid var(--border-subtle);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    z-index: 60;
+    transition: width 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
+}
+
+.app-container.tracklist-collapsed .tracklist-panel {
+    width: 0 !important;
+    min-width: 0 !important;
+    border-left: none;
+    overflow: hidden;
+    pointer-events: none;
+    opacity: 0;
+}
+
+.tracklist-panel-header {
+    padding: 1.25rem 1.5rem;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--border-subtle);
+    background: #13131a;
+    flex-shrink: 0;
+}
+
+.tracklist-panel-title-wrap {
+    display: flex; align-items: center; gap: 0.6rem;
+}
+.panel-icon { font-size: 1.1rem; }
+.tracklist-panel-header .panel-title {
+    font-size: 1.05rem; font-weight: 600; color: var(--text-main); margin: 0;
+}
+
+.player-detail-view {
+    padding: 1.5rem;
+    overflow-y: auto;
+    flex: 1;
+    display: flex; flex-direction: column; gap: 1.5rem;
+    width: 100%;
+}
 
 .hero-player-card {
-    display: flex; gap: 2rem; align-items: center; margin-bottom: 2.5rem;
-    position: relative;
+    display: flex; flex-direction: column; align-items: center;
+    text-align: center; gap: 1rem; margin-bottom: 0;
 }
 
 .hero-artwork-wrapper {
-    position: relative; width: 240px; height: 240px; flex-shrink: 0;
+    position: relative; width: 190px; height: 190px; flex-shrink: 0;
 }
-.hero-backdrop {
-    display: none;
-}
+.hero-backdrop { display: none; }
 .hero-cover {
-    position: relative; width: 100%; height: 100%; object-fit: cover;
-    border-radius: 20px; z-index: 2; box-shadow: 0 15px 35px rgba(0,0,0,0.7);
-    border: 1px solid var(--border-subtle);
+    width: 100%; height: 100%; object-fit: cover;
+    border-radius: 16px; border: 1px solid var(--border-subtle);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6);
     cursor: pointer;
     transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease;
 }
 .hero-cover:hover {
     transform: scale(1.02);
-    box-shadow: 0 20px 40px rgba(0,0,0,0.85);
+    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.8);
 }
-.hero-cover:active {
-    transform: scale(0.99);
-}
+.hero-cover:active { transform: scale(0.99); }
 
-.hero-info { flex: 1; z-index: 2; }
-.hero-info h2 { font-size: 1.8rem; font-weight: 700; margin-bottom: 0.4rem; line-height: 1.2; }
-.hero-narrator { font-size: 1rem; color: var(--text-dim); margin-bottom: 0.8rem; }
-.hero-meta { font-size: 0.85rem; color: var(--primary-color); }
+.hero-info { width: 100%; }
+.hero-info h2 { font-size: 1.25rem; font-weight: 700; margin-bottom: 0.25rem; line-height: 1.25; }
+.hero-narrator { font-size: 0.85rem; color: var(--text-dim); margin-bottom: 0.4rem; }
+.hero-meta { font-size: 0.8rem; color: var(--primary-color); font-weight: 500; }
 
 .tracklist-container {
-    background: var(--surface-color); border-radius: 16px;
-    padding: 1.5rem; border: 1px solid var(--border-subtle);
+    background: rgba(255, 255, 255, 0.02); border-radius: 14px;
+    padding: 1rem; border: 1px solid var(--border-subtle);
+    display: flex; flex-direction: column; gap: 0.5rem;
+}
+.tracklist-header-row {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 0.4rem;
 }
 .tracklist-heading {
-    font-size: 0.9rem; font-weight: 600; text-transform: uppercase;
-    letter-spacing: 1px; color: var(--text-dim); margin-bottom: 1rem;
+    font-size: 0.78rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 1px; color: var(--text-dim); margin: 0;
 }
+.tracklist-count { font-size: 0.75rem; color: var(--text-dim); }
 
 .track-row {
-    display: flex; align-items: center; padding: 0.85rem 1rem;
-    border-radius: 10px; cursor: pointer; transition: background-color var(--transition-fast);
-    margin-bottom: 4px;
+    display: flex; align-items: center; padding: 0.7rem 0.85rem;
+    border-radius: 8px; cursor: pointer; transition: background-color var(--transition-fast);
+    margin-bottom: 2px;
 }
 .track-row:hover { background-color: var(--surface-hover); }
 .track-row.active {
     background-color: rgba(140, 122, 230, 0.15); border: 1px solid rgba(140, 122, 230, 0.3);
 }
-.track-row-num { width: 32px; font-size: 0.85rem; color: var(--text-dim); }
+.track-row-num { width: 28px; font-size: 0.82rem; color: var(--text-dim); }
 .track-row.active .track-row-num { color: var(--primary-color); font-weight: 700; }
-.track-row-title { flex: 1; font-size: 0.92rem; font-weight: 500; }
-.track-row-duration { font-size: 0.8rem; color: var(--text-dim); }
+.track-row-title { flex: 1; font-size: 0.88rem; font-weight: 500; }
+.track-row-duration { font-size: 0.78rem; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+.track-info-mini.clickable {
+    cursor: pointer;
+    border-radius: 6px;
+    padding: 2px 4px;
+    margin: -2px -4px;
+    transition: background-color 0.15s ease;
+}
+.track-info-mini.clickable:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.tracklist-toggle-btn.active {
+    color: var(--primary-color);
+}
+
+.tracklist-backdrop {
+    display: none;
+}
 
 /* ==========================================================================
    Playback Controls
@@ -479,8 +577,34 @@ input[type="range"] { flex: 1; height: 4px; cursor: pointer; accent-color: var(-
     .playlist-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1rem; }
     .playlists-view { padding: 1rem; }
     
-    .hero-player-card { flex-direction: column; text-align: center; gap: 1.2rem; }
-    .hero-artwork-wrapper { width: 180px; height: 180px; }
+    /* Mobile Slide-Up Tracklist Drawer */
+    .tracklist-panel {
+        position: fixed; left: 0; right: 0; bottom: 0; top: auto;
+        width: 100% !important; max-height: 85vh;
+        z-index: 300; background: #151522;
+        border-radius: 20px 20px 0 0;
+        border-top: 1px solid var(--border-subtle);
+        border-left: none;
+        box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.85);
+        transform: translateY(105%);
+        transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
+        opacity: 0;
+        pointer-events: none;
+    }
+    .app-container:not(.tracklist-collapsed) .tracklist-panel {
+        transform: translateY(0) !important;
+        opacity: 1 !important;
+        pointer-events: auto !important;
+    }
+    .app-container:not(.tracklist-collapsed) .tracklist-backdrop {
+        display: block;
+        position: fixed; inset: 0;
+        background: rgba(0, 0, 0, 0.65);
+        z-index: 290;
+    }
+
+    .hero-player-card { flex-direction: column; text-align: center; gap: 1rem; }
+    .hero-artwork-wrapper { width: 160px; height: 160px; }
     
     .vtt-cue { font-size: 1.25rem; margin: 1.2rem auto; }
 }

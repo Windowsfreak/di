@@ -564,7 +564,12 @@ const el = {
     playlistsView: document.getElementById('playlists-view'),
     playlistGrid: document.getElementById('playlist-grid'),
 
-    // Hero player & tracklist
+    // Dedicated Tracklist / Now Playing Panel
+    tracklistPanel: document.getElementById('tracklist-panel'),
+    toggleTracklistBtn: document.getElementById('toggle-tracklist-btn'),
+    closeTracklistBtn: document.getElementById('close-tracklist-btn'),
+    tracklistBackdrop: document.getElementById('tracklist-backdrop'),
+    tracklistCount: document.getElementById('tracklist-count'),
     playerDetailView: document.getElementById('player-detail-view'),
     heroBackdrop: document.getElementById('hero-backdrop'),
     heroCover: document.getElementById('hero-cover'),
@@ -575,6 +580,7 @@ const el = {
     trackList: document.getElementById('track-list'),
 
     // Playback bar controls
+    trackInfoMini: document.getElementById('track-info-mini'),
     trackName: document.getElementById('current-track-name'),
     playlistName: document.getElementById('current-playlist-name'),
     progressBar: document.getElementById('progress-bar'),
@@ -847,6 +853,16 @@ async function init() {
         await selectCategory(targetCat);
     }
 
+    // Restore or initialize Tracklist Panel state
+    try {
+        const savedPanelState = localStorage.getItem('di_tracklist_panel_open');
+        const defaultOpen = window.innerWidth >= 1024;
+        const shouldBeOpen = (savedPanelState !== null) ? (savedPanelState === 'true') : defaultOpen;
+        setTracklistPanelOpen(shouldBeOpen);
+    } catch(e) {
+        setTracklistPanelOpen(window.innerWidth >= 1024);
+    }
+
     updateDownloadedBadge();
     requestAnimationFrame(updateUI);
 }
@@ -961,9 +977,31 @@ function updateDownloadedBadge() {
 // ============================================================================
 // 7. Navigation & Rendering
 // ============================================================================
+function setTracklistPanelOpen(isOpen) {
+    if (isOpen) {
+        el.app.classList.remove('tracklist-collapsed');
+    } else {
+        el.app.classList.add('tracklist-collapsed');
+    }
+    const isNowOpen = !el.app.classList.contains('tracklist-collapsed');
+    if (el.toggleTracklistBtn) el.toggleTracklistBtn.classList.toggle('active', isNowOpen);
+    if (el.tracklistToggleBtn) el.tracklistToggleBtn.classList.toggle('active', isNowOpen);
+    if (el.tracklistBackdrop) el.tracklistBackdrop.classList.toggle('hidden', !isNowOpen);
+    try {
+        localStorage.setItem('di_tracklist_panel_open', isNowOpen ? 'true' : 'false');
+    } catch(e) {}
+}
+
+function toggleTracklistPanel() {
+    setTracklistPanelOpen(el.app.classList.contains('tracklist-collapsed'));
+}
+
 function showCategoriesView() {
     el.app.classList.add('show-categories');
     el.app.classList.remove('show-playlists');
+    if (window.innerWidth <= 768) {
+        setTracklistPanelOpen(false);
+    }
 }
 
 function showPlaylistsView() {
@@ -1131,8 +1169,12 @@ function renderPlayerDetail() {
     el.heroNarrator.textContent = pl.narrator || pl.author || '';
     el.heroMeta.textContent = `${pl.total_tracks} ${pl.total_tracks === 1 ? 'track' : 'tracks'} • ${formatTime(pl.total_duration_sec)}`;
 
-    // Tracklist rendering for multi-track playlists
-    if (pl.tracks && pl.tracks.length > 1) {
+    if (el.tracklistCount) {
+        el.tracklistCount.textContent = `${pl.total_tracks} ${pl.total_tracks === 1 ? 'track' : 'tracks'}`;
+    }
+
+    // Tracklist rendering for playlists with tracks
+    if (pl.tracks && pl.tracks.length > 0) {
         el.tracklistContainer.classList.remove('hidden');
         el.trackList.innerHTML = pl.tracks.map((t, idx) => {
             const isActive = idx === state.playlist.currentTrackIndex;
@@ -1144,6 +1186,12 @@ function renderPlayerDetail() {
                 </div>
             `;
         }).join('');
+
+        // Smooth scroll active track into view
+        const activeRow = el.trackList.querySelector('.track-row.active');
+        if (activeRow) {
+            activeRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
     } else {
         el.tracklistContainer.classList.add('hidden');
     }
@@ -1490,6 +1538,29 @@ function setupEventListeners() {
         }
     });
 
+    // Tracklist panel toggle controls
+    if (el.toggleTracklistBtn) {
+        el.toggleTracklistBtn.addEventListener('click', toggleTracklistPanel);
+    }
+    if (el.closeTracklistBtn) {
+        el.closeTracklistBtn.addEventListener('click', () => setTracklistPanelOpen(false));
+    }
+    if (el.tracklistToggleBtn) {
+        el.tracklistToggleBtn.addEventListener('click', toggleTracklistPanel);
+    }
+    if (el.trackInfoMini) {
+        el.trackInfoMini.addEventListener('click', toggleTracklistPanel);
+        el.trackInfoMini.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                toggleTracklistPanel();
+            }
+        });
+    }
+    if (el.tracklistBackdrop) {
+        el.tracklistBackdrop.addEventListener('click', () => setTracklistPanelOpen(false));
+    }
+
     // Play/Pause button
     el.playPauseBtn.addEventListener('click', () => {
         if (state.audio.isPaused) state.audio.resume();
@@ -1698,6 +1769,13 @@ function setupEventListeners() {
             } else if (state.restoredSeekTime > 0) {
                 state.restoredSeekTime = Math.max(0, state.restoredSeekTime - 10);
                 savePlaybackSession();
+            }
+        } else if (e.key === 't' || e.key === 'T') {
+            e.preventDefault();
+            toggleTracklistPanel();
+        } else if (e.key === 'Escape') {
+            if (!el.app.classList.contains('tracklist-collapsed')) {
+                setTracklistPanelOpen(false);
             }
         }
     });
