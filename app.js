@@ -581,6 +581,7 @@ const el = {
 
     // Playback bar controls
     trackInfoMini: document.getElementById('track-info-mini'),
+    tracklistToggleBtn: document.getElementById('tracklist-toggle-btn'),
     trackName: document.getElementById('current-track-name'),
     playlistName: document.getElementById('current-playlist-name'),
     progressBar: document.getElementById('progress-bar'),
@@ -597,7 +598,12 @@ const el = {
     modeIcon: document.getElementById('mode-icon'),
     vttBtn: document.getElementById('vtt-btn'),
     sleepTimerBtn: document.getElementById('sleep-timer-btn'),
-    navToggle: document.getElementById('nav-toggle'),
+
+    // Mobile Navigation Bar
+    mobileNavBar: document.getElementById('mobile-nav-bar'),
+    mobileTabCategories: document.getElementById('mobile-tab-categories'),
+    mobileTabPlaylists: document.getElementById('mobile-tab-playlists'),
+    mobileTabPlaylistsLabel: document.getElementById('mobile-tab-playlists-label'),
 
     // HUD Action Hint Toast
     hudToast: document.getElementById('hud-toast'),
@@ -999,6 +1005,8 @@ function toggleTracklistPanel() {
 function showCategoriesView() {
     el.app.classList.add('show-categories');
     el.app.classList.remove('show-playlists');
+    if (el.mobileTabCategories) el.mobileTabCategories.classList.add('active');
+    if (el.mobileTabPlaylists) el.mobileTabPlaylists.classList.remove('active');
     if (window.innerWidth <= 768) {
         setTracklistPanelOpen(false);
     }
@@ -1007,6 +1015,8 @@ function showCategoriesView() {
 function showPlaylistsView() {
     el.app.classList.add('show-playlists');
     el.app.classList.remove('show-categories');
+    if (el.mobileTabPlaylists) el.mobileTabPlaylists.classList.add('active');
+    if (el.mobileTabCategories) el.mobileTabCategories.classList.remove('active');
 }
 
 function renderCategories() {
@@ -1048,16 +1058,24 @@ async function ensureCategoryPlaylistsLoaded(categorySlug) {
     return state.playlistsByCat.get(categorySlug) || [];
 }
 
-async function selectCategory(categorySlug) {
+async function selectCategory(categorySlug, navigate = false) {
     state.playlist.currentCategory = categorySlug;
     const cat = state.categories.find(c => c.slug === categorySlug);
     const playlists = await ensureCategoryPlaylistsLoaded(categorySlug);
 
     state.playlist.setCategory(categorySlug, playlists);
 
-    el.viewTitle.textContent = cat ? cat.title : 'Playlists';
+    const title = cat ? cat.title : 'Playlists';
+    el.viewTitle.textContent = title;
+    if (el.mobileTabPlaylistsLabel) {
+        el.mobileTabPlaylistsLabel.textContent = title;
+    }
     renderCategories();
     renderPlaylists();
+
+    if (navigate && window.innerWidth <= 768) {
+        showPlaylistsView();
+    }
 }
 
 function renderPlaylists() {
@@ -1493,7 +1511,7 @@ function setupEventListeners() {
     // Category item selection
     el.categoryList.addEventListener('click', (e) => {
         const item = e.target.closest('.category-item');
-        if (item) selectCategory(item.dataset.slug);
+        if (item) selectCategory(item.dataset.slug, true);
     });
 
     // Offline filter toggle
@@ -1699,11 +1717,9 @@ function setupEventListeners() {
     });
 
     // Navigation toggles (Mobile)
-    el.backBtn.addEventListener('click', showCategoriesView);
-    el.navToggle.addEventListener('click', () => {
-        if (el.app.classList.contains('show-categories')) showPlaylistsView();
-        else showCategoriesView();
-    });
+    if (el.backBtn) el.backBtn.addEventListener('click', showCategoriesView);
+    if (el.mobileTabCategories) el.mobileTabCategories.addEventListener('click', showCategoriesView);
+    if (el.mobileTabPlaylists) el.mobileTabPlaylists.addEventListener('click', showPlaylistsView);
 
     // Settings Modal
     el.settingsBtn.addEventListener('click', () => {

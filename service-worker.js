@@ -3,7 +3,7 @@
  * Robust Offline Engine with Separate Shell & Audio Caches
  */
 
-const SHELL_CACHE = 'di-shell-v10';
+const SHELL_CACHE = 'di-shell-v11';
 const AUDIO_CACHE = 'di-audio-offline-v1';
 
 const SHELL_ASSETS = [
