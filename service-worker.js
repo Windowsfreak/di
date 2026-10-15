@@ -3,7 +3,7 @@
  * Robust Offline Engine with Separate Shell & Audio Caches
  */
 
-const SHELL_CACHE = 'di-shell-v11';
+const SHELL_CACHE = 'di-shell-v12';
 const AUDIO_CACHE = 'di-audio-offline-v1';
 
 const SHELL_ASSETS = [
@@ -282,7 +282,7 @@ self.addEventListener('fetch', (e) => {
     );
 });
 
-// Seekable 206 Partial Content Audio Handler
+// Audio Handler: Serve 206 Partial Content when cached offline, stream directly from network when online
 async function handleAudioRequest(request) {
     const audioCache = await caches.open(AUDIO_CACHE);
     const requestUrl = new URL(request.url).href;
@@ -293,32 +293,25 @@ async function handleAudioRequest(request) {
         cachedResponse = await shellCache.match(requestUrl, { ignoreSearch: true, ignoreVary: true });
     }
 
-    if (!cachedResponse) {
-        try {
-            const networkResponse = await fetch(request.url);
-            if (networkResponse.ok) {
-                await audioCache.put(requestUrl, networkResponse.clone());
-                cachedResponse = await audioCache.match(requestUrl, { ignoreSearch: true, ignoreVary: true });
-            } else {
-                return networkResponse;
-            }
-        } catch (err) {
-            console.warn('[SW] Offline and audio not cached:', requestUrl);
-            return new Response('Audio not available offline', {
-                status: 503,
-                statusText: 'Service Unavailable'
-            });
-        }
+    // 1. If downloaded/cached offline, serve seekable 206 Partial Content from cache
+    if (cachedResponse) {
+        return serveCachedAudio206(cachedResponse, request);
     }
 
-    if (!cachedResponse) {
+    // 2. Not cached: Stream directly from network preserving Range headers (instant playback, single download)
+    try {
+        return await fetch(request);
+    } catch (err) {
+        console.warn('[SW] Offline and audio not cached:', requestUrl);
         return new Response('Audio not available offline', {
             status: 503,
             statusText: 'Service Unavailable'
         });
     }
+}
 
-    // Serve from Cache with HTTP 206 Partial Content (essential for Safari/Chrome seeking)
+// Serve from Cache with HTTP 206 Partial Content (essential for Safari/Chrome seeking offline)
+async function serveCachedAudio206(cachedResponse, request) {
     let rangeHeader = request.headers.get('Range');
     const blob = await cachedResponse.blob();
     const size = blob.size;
